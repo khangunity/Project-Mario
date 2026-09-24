@@ -6,22 +6,38 @@ using System.IO;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
+
 class Program
 {
     static TcpListener server;
 
-    // Lưu các client đang kết nối
-    static Dictionary<int, TcpClient> clients = new Dictionary<int, TcpClient>();
+    // Player ID -> Client
+    static Dictionary<int, TcpClient> clients =
+        new Dictionary<int, TcpClient>();
 
-    // Khóa để tránh nhiều Thread cùng sửa dữ liệu
-    static readonly object lockObject = new object();
+    // Player ID -> vị trí
+    static Dictionary<int, string> playerPositions =
+        new Dictionary<int, string>();
+
+    static readonly object lockObject =
+        new object();
+
+
+    // =========================================
+    // MAIN
+    // =========================================
 
     static void Main()
     {
         int port = 5000;
 
-        server = new TcpListener(IPAddress.Any, port);
+        server = new TcpListener(
+            IPAddress.Any,
+            port
+        );
+
         server.Start();
+
 
         Console.WriteLine("================================");
         Console.WriteLine("       GAME SERVER STARTED");
@@ -29,39 +45,64 @@ class Program
         Console.WriteLine("Port: " + port);
         Console.WriteLine("Waiting for players...");
 
+
         while (true)
         {
-            TcpClient client = server.AcceptTcpClient();
+            TcpClient client =
+                server.AcceptTcpClient();
 
-            int playerId = GetFreePlayerId();
 
-            // Nếu đã đủ 2 người
+            int playerId =
+                GetFreePlayerId();
+
+
+            // Đã đủ 2 Player
             if (playerId == -1)
             {
-                Console.WriteLine("Server full! Rejecting client.");
+                Console.WriteLine(
+                    "Server full! Rejecting client."
+                );
+
                 client.Close();
+
                 continue;
             }
+
 
             lock (lockObject)
             {
                 clients[playerId] = client;
             }
 
+
             Console.WriteLine(
-                "Player " + playerId + " connected!"
+                "Player " +
+                playerId +
+                " connected!"
             );
 
-            Thread clientThread = new Thread(() =>
-            {
-                HandleClient(client, playerId);
-            });
+
+            Thread clientThread =
+                new Thread(() =>
+                {
+                    HandleClient(
+                        client,
+                        playerId
+                    );
+                });
+
+
+            clientThread.IsBackground = true;
 
             clientThread.Start();
         }
     }
 
-    // Tìm Player ID còn trống
+
+    // =========================================
+    // TÌM PLAYER ID TRỐNG
+    // =========================================
+
     static int GetFreePlayerId()
     {
         lock (lockObject)
@@ -78,136 +119,332 @@ class Program
         return -1;
     }
 
-    // Xử lý một Player
-    static void HandleClient(TcpClient client, int playerId)
+
+    // =========================================
+    // CLIENT
+    // =========================================
+
+    static void HandleClient(
+        TcpClient client,
+        int playerId
+    )
     {
         try
         {
-            NetworkStream stream = client.GetStream();
+            NetworkStream stream =
+                client.GetStream();
 
-            // Gửi ID cho Unity
+
+            // ---------------------------------
+            // Gửi Player ID
+            // ---------------------------------
+
             SendMessage(
                 client,
-                "PLAYER_ID|" + playerId + "\n"
+                "PLAYER_ID|" +
+                playerId +
+                "\n"
             );
+
 
             Console.WriteLine(
-                "Sent ID to Player " + playerId
+                "Sent ID to Player " +
+                playerId
             );
 
-            // Đọc dữ liệu từ Unity
-            StreamReader reader = new StreamReader(
-                stream,
-                Encoding.UTF8
+
+            // ---------------------------------
+            // Gửi vị trí ban đầu
+            // ---------------------------------
+
+            string startPosition;
+
+
+            if (playerId == 1)
+            {
+                startPosition =
+                    "STATE|1|-3|0.5|0\n";
+            }
+            else
+            {
+                startPosition =
+                    "STATE|2|3|0.5|0\n";
+            }
+
+
+            SendMessage(
+                client,
+                startPosition
             );
+
+
+            // ---------------------------------
+            // Gửi vị trí Player khác
+            // ---------------------------------
+
+            lock (lockObject)
+            {
+                foreach (
+                    var pair
+                    in playerPositions
+                )
+                {
+                    SendMessage(
+                        client,
+                        pair.Value + "\n"
+                    );
+                }
+            }
+
+
+            // ---------------------------------
+            // Đọc dữ liệu Client
+            // ---------------------------------
+
+            StreamReader reader =
+                new StreamReader(
+                    stream,
+                    Encoding.UTF8
+                );
+
 
             while (true)
             {
-                string message = reader.ReadLine();
+                string message =
+                    reader.ReadLine();
 
-                // ReadLine trả về null khi client ngắt kết nối
+
+                // Client disconnect
                 if (message == null)
                 {
                     break;
                 }
 
-                if (message.StartsWith("MOVE|"))
+
+                Console.WriteLine(
+                    "Player " +
+                    playerId +
+                    ": " +
+                    message
+                );
+
+
+                // =============================
+                // MOVE
+                // =============================
+
+                if (
+                    message.StartsWith(
+                        "MOVE|"
+                    )
+                )
                 {
-                    HandleMove(message);
+                    HandleMove(
+                        message
+                    );
+                }
+
+
+                // =============================
+                // BUTTON
+                // =============================
+
+                else if (
+                    message ==
+                    "BUTTON_CLICK"
+                )
+                {
+                    HandleButtonClick(
+                        playerId
+                    );
                 }
             }
         }
-        catch (Exception)
+        catch
         {
-            // Player bị ngắt kết nối
+            Console.WriteLine(
+                "Connection error with Player " +
+                playerId
+            );
         }
 
-        // Player thoát
-        DisconnectPlayer(playerId);
+
+        DisconnectPlayer(
+            playerId
+        );
+
 
         client.Close();
     }
 
-    // Xử lý MOVE
-    static void HandleMove(string message)
+
+    // =========================================
+    // MOVE
+    // =========================================
+
+    static void HandleMove(
+        string message
+    )
     {
         try
         {
-            string[] parts = message.Split('|');
+            string[] parts =
+                message.Split('|');
+
 
             if (parts.Length < 5)
                 return;
 
-            int playerId = int.Parse(parts[1]);
 
-            float x = float.Parse(
-                parts[2],
-                CultureInfo.InvariantCulture
-            );
+            int playerId =
+                int.Parse(parts[1]);
 
-            float y = float.Parse(
-                parts[3],
-                CultureInfo.InvariantCulture
-            );
 
-            float z = float.Parse(
-                parts[4],
-                CultureInfo.InvariantCulture
-            );
+            float x =
+                float.Parse(
+                    parts[2],
+                    CultureInfo.InvariantCulture
+                );
 
-            Console.WriteLine(
-                "Player " + playerId +
-                " Position: " +
-                x + ", " +
-                y + ", " +
-                z
-            );
 
-            // Gửi vị trí cho những Player khác
-            Broadcast(
+            float y =
+                float.Parse(
+                    parts[3],
+                    CultureInfo.InvariantCulture
+                );
+
+
+            float z =
+                float.Parse(
+                    parts[4],
+                    CultureInfo.InvariantCulture
+                );
+
+
+            string state =
                 "STATE|" +
-                playerId + "|" +
-                x.ToString(CultureInfo.InvariantCulture) + "|" +
-                y.ToString(CultureInfo.InvariantCulture) + "|" +
-                z.ToString(CultureInfo.InvariantCulture) +
-                "\n"
+                playerId +
+                "|" +
+                x.ToString(
+                    CultureInfo.InvariantCulture
+                ) +
+                "|" +
+                y.ToString(
+                    CultureInfo.InvariantCulture
+                ) +
+                "|" +
+                z.ToString(
+                    CultureInfo.InvariantCulture
+                );
+
+
+            // Lưu vị trí
+            lock (lockObject)
+            {
+                playerPositions[playerId] =
+                    state;
+            }
+
+
+            // Gửi cho tất cả Client
+            Broadcast(
+                state + "\n"
             );
         }
         catch
         {
-            Console.WriteLine("Invalid MOVE message.");
+            Console.WriteLine(
+                "Invalid MOVE message."
+            );
         }
     }
 
-    // Gửi message cho một client
-    static void SendMessage(TcpClient client, string message)
+
+    // =========================================
+    // BUTTON
+    // =========================================
+
+    static void HandleButtonClick(
+        int playerId
+    )
+    {
+        Console.WriteLine(
+            "Player " +
+            playerId +
+            " pressed the button!"
+        );
+
+
+        string message =
+            "BUTTON_CLICK|" +
+            playerId +
+            "\n";
+
+
+        // Gửi cho cả 2 Client
+        Broadcast(message);
+    }
+
+
+    // =========================================
+    // SEND
+    // =========================================
+
+    static void SendMessage(
+        TcpClient client,
+        string message
+    )
     {
         try
         {
-            NetworkStream stream = client.GetStream();
+            NetworkStream stream =
+                client.GetStream();
 
-            byte[] data = Encoding.UTF8.GetBytes(message);
 
-            stream.Write(data, 0, data.Length);
+            byte[] data =
+                Encoding.UTF8.GetBytes(
+                    message
+                );
+
+
+            stream.Write(
+                data,
+                0,
+                data.Length
+            );
         }
         catch
         {
         }
     }
 
-    // Gửi message cho tất cả Player
-    static void Broadcast(string message)
+
+    // =========================================
+    // BROADCAST
+    // =========================================
+
+    static void Broadcast(
+        string message
+    )
     {
-        byte[] data = Encoding.UTF8.GetBytes(message);
+        byte[] data =
+            Encoding.UTF8.GetBytes(
+                message
+            );
+
 
         lock (lockObject)
         {
-            foreach (var pair in clients)
+            foreach (
+                var pair
+                in clients
+            )
             {
                 try
                 {
                     NetworkStream stream =
                         pair.Value.GetStream();
+
 
                     stream.Write(
                         data,
@@ -222,24 +459,37 @@ class Program
         }
     }
 
-    // Xóa Player khi thoát
-    static void DisconnectPlayer(int playerId)
+
+    // =========================================
+    // DISCONNECT
+    // =========================================
+
+    static void DisconnectPlayer(
+        int playerId
+    )
     {
         lock (lockObject)
         {
-            if (clients.ContainsKey(playerId))
-            {
-                clients.Remove(playerId);
-            }
+            clients.Remove(
+                playerId
+            );
+
+            playerPositions.Remove(
+                playerId
+            );
         }
 
+
         Console.WriteLine(
-            "Player " + playerId +
+            "Player " +
+            playerId +
             " disconnected."
         );
 
+
         Console.WriteLine(
-            "Player " + playerId +
+            "Player " +
+            playerId +
             " slot is now FREE."
         );
     }

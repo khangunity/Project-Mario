@@ -1,29 +1,56 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using TMPro;
 
 using System;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
+
 public class NetworkPlayer : MonoBehaviour
 {
+    // =========================================
+    // NETWORK
+    // =========================================
+
     private TcpClient client;
+
     private NetworkStream stream;
+
+    private Thread receiveThread;
 
     private int playerId = -1;
 
+
+    // =========================================
+    // PLAYER
+    // =========================================
+
     public float moveSpeed = 5f;
 
-    // Thread nhận dữ liệu từ Server
-    private Thread receiveThread;
 
-    // Vị trí của Player khác
+    // =========================================
+    // OTHER PLAYER
+    // =========================================
+
+    private GameObject otherPlayer;
+
     private Vector3 otherPlayerPosition;
 
-    // Có nhận được vị trí Player khác chưa?
     private bool hasOtherPlayerPosition = false;
 
+
+    // =========================================
+    // UI
+    // =========================================
+
+    public TMP_Text messageText;
+
+
+    // =========================================
+    // START
+    // =========================================
 
     void Start()
     {
@@ -31,48 +58,65 @@ public class NetworkPlayer : MonoBehaviour
     }
 
 
+    // =========================================
+    // UPDATE
+    // =========================================
+
     void Update()
     {
-        // Chưa nhận Player ID thì không cho di chuyển
         if (playerId == -1)
             return;
 
-        // Player của chính mình
+
+        // Điều khiển Player của mình
         MovePlayer();
 
-        // Gửi vị trí cho Server
+
+        // Gửi vị trí
         SendPosition();
 
-        // Cập nhật Player khác
+
+        // Cập nhật Player còn lại
         UpdateOtherPlayer();
     }
 
 
-    // =========================
-    // CONNECT SERVER
-    // =========================
+    // =========================================
+    // CONNECT
+    // =========================================
 
     void ConnectToServer()
     {
         try
         {
-            client = new TcpClient();
-
-            client.Connect("127.0.0.1", 5000);
-
-            stream = client.GetStream();
-
-            Debug.Log("Connected to Server!");
+            client =
+                new TcpClient();
 
 
-            // Nhận Player ID
-            ReceivePlayerID();
+            client.Connect(
+                "192.168.1.4",
+                5000
+            );
 
 
-            // Bắt đầu Thread nhận dữ liệu
-            receiveThread = new Thread(ReceiveData);
+            stream =
+                client.GetStream();
 
-            receiveThread.IsBackground = true;
+
+            Debug.Log(
+                "Connected to Server!"
+            );
+
+
+            receiveThread =
+                new Thread(
+                    ReceiveData
+                );
+
+
+            receiveThread.IsBackground =
+                true;
+
 
             receiveThread.Start();
         }
@@ -86,64 +130,30 @@ public class NetworkPlayer : MonoBehaviour
     }
 
 
-    // =========================
-    // RECEIVE PLAYER ID
-    // =========================
-
-    void ReceivePlayerID()
-    {
-        byte[] buffer = new byte[1024];
-
-        int bytes = stream.Read(
-            buffer,
-            0,
-            buffer.Length
-        );
-
-        string message =
-            Encoding.UTF8.GetString(
-                buffer,
-                0,
-                bytes
-            );
-
-        Debug.Log("Server: " + message);
-
-
-        string[] parts =
-            message.Trim().Split('|');
-
-
-        if (parts.Length >= 2)
-        {
-            playerId =
-                int.Parse(parts[1]);
-
-            Debug.Log(
-                "My Player ID = " +
-                playerId
-            );
-        }
-    }
-
-
-    // =========================
+    // =========================================
     // RECEIVE DATA
-    // =========================
+    // =========================================
 
     void ReceiveData()
     {
-        byte[] buffer = new byte[1024];
+        byte[] buffer =
+            new byte[4096];
 
-        while (client != null && client.Connected)
+
+        while (
+            client != null &&
+            client.Connected
+        )
         {
             try
             {
-                int bytes = stream.Read(
-                    buffer,
-                    0,
-                    buffer.Length
-                );
+                int bytes =
+                    stream.Read(
+                        buffer,
+                        0,
+                        buffer.Length
+                    );
+
 
                 if (bytes <= 0)
                     break;
@@ -164,9 +174,14 @@ public class NetworkPlayer : MonoBehaviour
                     );
 
 
-                foreach (string msg in messages)
+                foreach (
+                    string msg
+                    in messages
+                )
                 {
-                    HandleMessage(msg.Trim());
+                    HandleMessage(
+                        msg.Trim()
+                    );
                 }
             }
             catch
@@ -177,116 +192,219 @@ public class NetworkPlayer : MonoBehaviour
     }
 
 
-    // =========================
-    // HANDLE SERVER MESSAGE
-    // =========================
+    // =========================================
+    // HANDLE MESSAGE
+    // =========================================
 
-    void HandleMessage(string message)
+    void HandleMessage(
+        string message
+    )
     {
-        if (!message.StartsWith("STATE|"))
-            return;
+        Debug.Log(
+            "Server: " +
+            message
+        );
 
 
-        string[] parts =
-            message.Split('|');
+        // =====================================
+        // PLAYER ID
+        // =====================================
 
-
-        if (parts.Length < 5)
-            return;
-
-
-        int receivedPlayerId =
-            int.Parse(parts[1]);
-
-
-        // Không xử lý vị trí của chính mình
-        if (receivedPlayerId == playerId)
-            return;
-
-
-        float x =
-            float.Parse(
-                parts[2],
-                System.Globalization.CultureInfo.InvariantCulture
-            );
-
-        float y =
-            float.Parse(
-                parts[3],
-                System.Globalization.CultureInfo.InvariantCulture
-            );
-
-        float z =
-            float.Parse(
-                parts[4],
-                System.Globalization.CultureInfo.InvariantCulture
-            );
-
-
-        otherPlayerPosition =
-            new Vector3(x, y, z);
-
-
-        hasOtherPlayerPosition = true;
-    }
-
-
-    // =========================
-    // UPDATE OTHER PLAYER
-    // =========================
-
-    void UpdateOtherPlayer()
-    {
-        if (!hasOtherPlayerPosition)
-            return;
-
-
-        // Tìm Cube của Player khác
-        GameObject otherPlayer =
-            GameObject.Find(
-                playerId == 1
-                    ? "Player2"
-                    : "Player1"
-            );
-
-
-        if (otherPlayer != null)
+        if (
+            message.StartsWith(
+                "PLAYER_ID|"
+            )
+        )
         {
-            otherPlayer.transform.position =
-                Vector3.Lerp(
-                    otherPlayer.transform.position,
-                    otherPlayerPosition,
-                    Time.deltaTime * 10f
+            string[] parts =
+                message.Split('|');
+
+
+            if (parts.Length >= 2)
+            {
+                playerId =
+                    int.Parse(
+                        parts[1]
+                    );
+
+
+                Debug.Log(
+                    "My Player ID = " +
+                    playerId
                 );
+
+
+                // Đặt vị trí ban đầu
+                if (playerId == 1)
+                {
+                    transform.position =
+                        new Vector3(
+                            -3f,
+                            0.5f,
+                            0f
+                        );
+                }
+                else
+                {
+                    transform.position =
+                        new Vector3(
+                            3f,
+                            0.5f,
+                            0f
+                        );
+                }
+            }
+        }
+
+
+        // =====================================
+        // PLAYER STATE
+        // =====================================
+
+        else if (
+            message.StartsWith(
+                "STATE|"
+            )
+        )
+        {
+            string[] parts =
+                message.Split('|');
+
+
+            if (parts.Length < 5)
+                return;
+
+
+            int receivedPlayerId =
+                int.Parse(
+                    parts[1]
+                );
+
+
+            // Không xử lý chính mình
+            if (
+                receivedPlayerId ==
+                playerId
+            )
+            {
+                return;
+            }
+
+
+            float x =
+                float.Parse(
+                    parts[2],
+                    System.Globalization.CultureInfo.InvariantCulture
+                );
+
+
+            float y =
+                float.Parse(
+                    parts[3],
+                    System.Globalization.CultureInfo.InvariantCulture
+                );
+
+
+            float z =
+                float.Parse(
+                    parts[4],
+                    System.Globalization.CultureInfo.InvariantCulture
+                );
+
+
+            otherPlayerPosition =
+                new Vector3(
+                    x,
+                    y,
+                    z
+                );
+
+
+            hasOtherPlayerPosition =
+                true;
+        }
+
+
+        // =====================================
+        // BUTTON
+        // =====================================
+
+        else if (
+            message.StartsWith(
+                "BUTTON_CLICK|"
+            )
+        )
+        {
+            string[] parts =
+                message.Split('|');
+
+
+            if (parts.Length < 2)
+                return;
+
+
+            int pressedPlayerId =
+                int.Parse(
+                    parts[1]
+                );
+
+
+            ShowButtonMessage(
+                pressedPlayerId
+            );
         }
     }
 
 
-    // =========================
+    // =========================================
     // MOVE
-    // =========================
+    // =========================================
 
     void MovePlayer()
     {
         float x = 0;
+
         float z = 0;
 
 
-        if (Keyboard.current.wKey.isPressed)
+        if (
+            Keyboard.current.wKey.isPressed
+        )
+        {
             z = 1;
+        }
 
-        if (Keyboard.current.sKey.isPressed)
+
+        if (
+            Keyboard.current.sKey.isPressed
+        )
+        {
             z = -1;
+        }
 
-        if (Keyboard.current.aKey.isPressed)
+
+        if (
+            Keyboard.current.aKey.isPressed
+        )
+        {
             x = -1;
+        }
 
-        if (Keyboard.current.dKey.isPressed)
+
+        if (
+            Keyboard.current.dKey.isPressed
+        )
+        {
             x = 1;
+        }
 
 
         Vector3 direction =
-            new Vector3(x, 0, z);
+            new Vector3(
+                x,
+                0,
+                z
+            );
 
 
         transform.position +=
@@ -296,25 +414,33 @@ public class NetworkPlayer : MonoBehaviour
     }
 
 
-    // =========================
+    // =========================================
     // SEND POSITION
-    // =========================
+    // =========================================
 
     void SendPosition()
     {
-        if (stream == null)
+        if (
+            stream == null ||
+            !stream.CanWrite
+        )
+        {
             return;
+        }
 
 
         string message =
             "MOVE|" +
-            playerId + "|" +
+            playerId +
+            "|" +
             transform.position.x.ToString(
                 System.Globalization.CultureInfo.InvariantCulture
-            ) + "|" +
+            ) +
+            "|" +
             transform.position.y.ToString(
                 System.Globalization.CultureInfo.InvariantCulture
-            ) + "|" +
+            ) +
+            "|" +
             transform.position.z.ToString(
                 System.Globalization.CultureInfo.InvariantCulture
             ) +
@@ -322,7 +448,9 @@ public class NetworkPlayer : MonoBehaviour
 
 
         byte[] data =
-            Encoding.UTF8.GetBytes(message);
+            Encoding.UTF8.GetBytes(
+                message
+            );
 
 
         try
@@ -342,24 +470,170 @@ public class NetworkPlayer : MonoBehaviour
     }
 
 
-    // =========================
-    // CLOSE CONNECTION
-    // =========================
+    // =========================================
+    // UPDATE OTHER PLAYER
+    // =========================================
+
+    void UpdateOtherPlayer()
+    {
+        if (
+            !hasOtherPlayerPosition
+        )
+        {
+            return;
+        }
+
+
+        // Nếu chưa có Player kia
+        // thì tạo Cube
+        if (
+            otherPlayer == null
+        )
+        {
+            otherPlayer =
+                GameObject.CreatePrimitive(
+                    PrimitiveType.Cube
+                );
+
+
+            if (playerId == 1)
+            {
+                otherPlayer.name =
+                    "Player2";
+            }
+            else
+            {
+                otherPlayer.name =
+                    "Player1";
+            }
+
+
+            otherPlayer.transform.position =
+                otherPlayerPosition;
+
+
+            otherPlayer.transform.localScale =
+                new Vector3(
+                    1f,
+                    1f,
+                    1f
+                );
+        }
+
+
+        // Di chuyển mượt
+        otherPlayer.transform.position =
+            Vector3.Lerp(
+                otherPlayer.transform.position,
+                otherPlayerPosition,
+                Time.deltaTime * 10f
+            );
+    }
+
+
+    // =========================================
+    // BUTTON
+    // =========================================
+
+    public void OnButtonClick()
+    {
+        if (
+            stream == null ||
+            !stream.CanWrite
+        )
+        {
+            Debug.LogError(
+                "Not connected to Server!"
+            );
+
+            return;
+        }
+
+
+        string message =
+            "BUTTON_CLICK\n";
+
+
+        byte[] data =
+            Encoding.UTF8.GetBytes(
+                message
+            );
+
+
+        try
+        {
+            stream.Write(
+                data,
+                0,
+                data.Length
+            );
+
+
+            Debug.Log(
+                "Button clicked!"
+            );
+        }
+        catch
+        {
+            Debug.LogError(
+                "Cannot send button click!"
+            );
+        }
+    }
+
+
+    // =========================================
+    // SHOW BUTTON MESSAGE
+    // =========================================
+
+    void ShowButtonMessage(
+        int pressedPlayerId
+    )
+    {
+        string message =
+            "Player " +
+            pressedPlayerId +
+            " đã nhấn nút!";
+
+
+        Debug.Log(
+            message
+        );
+
+
+        // Gửi việc cập nhật UI về Main Thread
+        UnityMainThreadDispatcher.Enqueue(
+            () =>
+            {
+                if (
+                    messageText != null
+                )
+                {
+                    messageText.text =
+                        message;
+                }
+            }
+        );
+    }
+
+
+    // =========================================
+    // QUIT
+    // =========================================
 
     void OnApplicationQuit()
     {
         try
         {
             if (stream != null)
+            {
                 stream.Close();
+            }
+
 
             if (client != null)
-                client.Close();
-
-            if (receiveThread != null &&
-                receiveThread.IsAlive)
             {
-                receiveThread.Abort();
+                client.Close();
             }
         }
         catch
