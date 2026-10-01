@@ -94,7 +94,7 @@ public class NetworkPlayer : MonoBehaviour
 
 
             client.Connect(
-                "192.168.1.4",
+                "10.51.183.248",
                 5000
             );
 
